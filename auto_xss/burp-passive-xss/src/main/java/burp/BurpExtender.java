@@ -545,7 +545,7 @@ public class BurpExtender implements IBurpExtender, IScannerCheck, ITab, IMessag
             if (!isCandidateResponse(attackResponseInfo.getHeaders())) {
                 continue;
             }
-            if (!responseReflectsPayload(attackResponse, attackResponseInfo.getBodyOffset(), v)) {
+            if (!responseReflectsPayload(attackResponse, attackResponseInfo.getBodyOffset(), v, attackResponseInfo.getHeaders())) {
                 continue;
             }
 
@@ -850,7 +850,7 @@ public class BurpExtender implements IBurpExtender, IScannerCheck, ITab, IMessag
                 continue;
             }
 
-            if (!responseReflectsPayload(attackResponse, attackResponseInfo.getBodyOffset(), payload)) {
+            if (!responseReflectsPayload(attackResponse, attackResponseInfo.getBodyOffset(), payload, attackResponseInfo.getHeaders())) {
                 continue;
             }
 
@@ -1108,7 +1108,7 @@ public class BurpExtender implements IBurpExtender, IScannerCheck, ITab, IMessag
         });
         p.add(headerBox);
 
-        p.add(new JLabel("Blacklist Domains (comma-separated):"));
+        p.add(new JLabel("Blacklist Domains (one per line):"));
         JTextArea blacklistArea = new JTextArea(3, 40);
         blacklistArea.setText(blacklistDomainsText == null ? "" : blacklistDomainsText);
         blacklistArea.setLineWrap(true);
@@ -1368,7 +1368,7 @@ public class BurpExtender implements IBurpExtender, IScannerCheck, ITab, IMessag
                 continue;
             }
 
-            if (!responseReflectsPayload(attackResponse, attackResponseInfo.getBodyOffset(), payload)) {
+            if (!responseReflectsPayload(attackResponse, attackResponseInfo.getBodyOffset(), payload, attackResponseInfo.getHeaders())) {
                 continue;
             }
 
@@ -1471,7 +1471,7 @@ public class BurpExtender implements IBurpExtender, IScannerCheck, ITab, IMessag
         return out;
     }
 
-    private boolean responseReflectsPayload(byte[] responseBytes, int bodyOffset, String payload) {
+    private boolean responseReflectsPayload(byte[] responseBytes, int bodyOffset, String payload, List<String> headers) {
         String responseText = helpers.bytesToString(responseBytes);
         if (bodyOffset < 0 || bodyOffset >= responseText.length()) {
             return false;
@@ -1500,7 +1500,7 @@ public class BurpExtender implements IBurpExtender, IScannerCheck, ITab, IMessag
                 if (idx < 0) {
                     break;
                 }
-                if (isLikelyExecutableReflection(body, idx, v)) {
+                if (isLikelyExecutableReflection(body, idx, v, headers)) {
                     return true;
                 }
                 from = idx + Math.max(1, v.length());
@@ -1512,10 +1512,40 @@ public class BurpExtender implements IBurpExtender, IScannerCheck, ITab, IMessag
         return false;
     }
 
-    private static boolean isLikelyExecutableReflection(String body, int reflectedIndex, String reflectedValue) {
+    private static boolean isLikelyExecutableReflection(String body, int reflectedIndex, String reflectedValue, List<String> headers) {
         if (body == null || reflectedValue == null) {
             return false;
         }
+
+        // Check Content-Type
+        if (headers != null) {
+            String contentType = null;
+            for (String header : headers) {
+                if (header == null) continue;
+                int idx = header.indexOf(':');
+                if (idx <= 0) continue;
+                String name = header.substring(0, idx).trim().toLowerCase(Locale.ROOT);
+                if ("content-type".equals(name)) {
+                    contentType = header.substring(idx + 1).trim().toLowerCase(Locale.ROOT);
+                    break;
+                }
+            }
+
+            if (contentType != null) {
+                // If explicit Content-Type is safe (JSON, Plain Text, etc.), assume no XSS.
+                // We only consider HTML, XHTML, and SVG as dangerous contexts for reflected XSS.
+                boolean isDangerous = contentType.contains("text/html")
+                        || contentType.contains("application/xhtml")
+                        || contentType.contains("image/svg")
+                        || contentType.contains("text/xml") // XML might allow XHTML namespace
+                        || contentType.contains("application/xml");
+                
+                if (!isDangerous) {
+                    return false;
+                }
+            }
+        }
+
         String v = reflectedValue.trim();
         if (v.length() < 3) {
             return false;
@@ -2397,7 +2427,7 @@ public class BurpExtender implements IBurpExtender, IScannerCheck, ITab, IMessag
                 continue;
             }
 
-            if (!responseReflectsPayload(attackResponse, attackResponseInfo.getBodyOffset(), valueForRequest)) {
+            if (!responseReflectsPayload(attackResponse, attackResponseInfo.getBodyOffset(), valueForRequest, attackResponseInfo.getHeaders())) {
                 continue;
             }
 
